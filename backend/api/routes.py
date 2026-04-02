@@ -375,3 +375,163 @@ def get_download_url(
 
     url = storage.generate_signed_url(ebook_file.gcs_path)
     return {"download_url": url, "format": ebook_file.format}
+
+
+# ──────────────────────────────────────────────
+# Platform validation & distribution
+# ──────────────────────────────────────────────
+
+
+@router.get("/platforms", tags=["Platforms"])
+def list_platforms():
+    """List all supported publishing platforms with their 2026 specs."""
+    from backend.services.platform_formatter import PlatformFormatter
+
+    formatter = PlatformFormatter()
+    return formatter.get_all_platforms()
+
+
+@router.get("/platforms/{platform_name}/spec", tags=["Platforms"])
+def get_platform_spec(platform_name: str):
+    """Get detailed 2026 format specification for a platform."""
+    from backend.services.platform_formatter import Platform, PlatformFormatter
+
+    try:
+        platform = Platform(platform_name)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown platform: {platform_name}. Use /platforms to see available options.",
+        )
+
+    formatter = PlatformFormatter()
+    spec = formatter.get_platform_spec(platform)
+    return {
+        "platform": spec.platform.value,
+        "supported_formats": spec.supported_formats,
+        "max_file_size_mb": spec.max_file_size_mb,
+        "cover_image_specs": spec.cover_image_specs,
+        "metadata_fields": spec.metadata_fields,
+        "content_requirements": spec.content_requirements,
+        "drm_options": spec.drm_options,
+        "pricing_currency": spec.pricing_currency,
+        "notes": spec.notes,
+    }
+
+
+@router.post(
+    "/projects/{project_id}/validate-platform/{platform_name}",
+    tags=["Platforms"],
+)
+def validate_for_platform(
+    project_id: str,
+    platform_name: str,
+    db: Session = Depends(get_db),
+):
+    """Validate an ebook project against a specific platform's 2026 requirements."""
+    from backend.services.platform_formatter import Platform, PlatformFormatter
+
+    try:
+        platform = Platform(platform_name)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unknown platform: {platform_name}")
+
+    project = db.query(EbookProject).filter(EbookProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    ebook_files = (
+        db.query(EbookFile).filter(EbookFile.project_id == project_id).all()
+    )
+    if not ebook_files:
+        raise HTTPException(status_code=400, detail="No ebook files generated yet")
+
+    formatter = PlatformFormatter()
+    results = []
+
+    for ebook_file in ebook_files:
+        metadata = {
+            "title": project.title,
+            "author": "DrDeSouzAI",
+            "description": project.description or "",
+            "language": project.language,
+        }
+
+        result = formatter.validate_for_platform(
+            platform=platform,
+            ebook_format=ebook_file.format,
+            file_size_bytes=ebook_file.file_size_bytes or 0,
+            metadata=metadata,
+            has_toc=True,
+            has_cover=False,  # TODO: track cover image in project
+            images_have_alt_text=True,
+        )
+        results.append({
+            "ebook_file_id": str(ebook_file.id),
+            "format": ebook_file.format,
+            "platform": result.platform.value,
+            "is_valid": result.is_valid,
+            "metadata_ready": result.metadata_ready,
+            "format_ready": result.format_ready,
+            "issues": [
+                {"severity": i.severity, "field": i.field, "message": i.message}
+                for i in result.issues
+            ],
+        })
+
+    return results
+
+
+@router.post(
+    "/projects/{project_id}/export/{export_type}",
+    tags=["Export"],
+)
+def export_for_tool(
+    project_id: str,
+    export_type: str,
+    db: Session = Depends(get_db),
+    storage: StorageService = Depends(get_storage),
+):
+    """Export project content for external tools.
+
+    Supported export_type values:
+    - 'pages': DOCX file for Apple Pages
+    - 'canva': Structured JSON for Canva templates
+    - 'audiobook': Generate audiobook MP3 via Text-to-Speech
+    """
+    from backend.services.distribution import DistributionService
+
+    project = db.query(EbookProject).filter(EbookProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    content_items = (
+        db.query(ContentItem)
+        .filter(ContentItem.project_id == project_id)
+        .order_by(ContentItem.chapter_order)
+        .all()
+    )
+    if not content_items:
+        raise HTTPException(status_code=400, detail="No content in project")
+
+    dist = DistributionService(storage_service=storage)
+
+    if export_type == "pages":
+        gcs_path = dist.export_for_pages(project, content_items)
+        return {"export_type": "pages", "format": "docx", "gcs_path": gcs_path}
+    elif export_type == "canva":
+        gcs_path = dist.export_for_canva(project, content_items)
+        return {"export_type": "canva", "format": "json", "gcs_path": gcs_path}
+    elif export_type == "audiobook":
+        script = dist.prepare_audiobook_script(content_items)
+        gcs_path = dist.generate_audiobook(
+            project=project,
+            text_content=script,
+            language=project.language or "en",
+        )
+        return {"export_type": "audiobook", "format": "mp3", "gcs_path": gcs_path}
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown export type: {export_type}. Use: pages, canva, audiobook",
+        )

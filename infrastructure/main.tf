@@ -254,11 +254,13 @@ resource "google_service_networking_connection" "private_vpc" {
 }
 
 # ──────────────────────────────────────────────────────────────
-# Secret Manager — ebook-db-secret
+# Secret Manager — per-service secrets (matching diagram)
+#   - ebook-content-processor-db-secret
+#   - ebook-validation-workflow-db-secret
 # ──────────────────────────────────────────────────────────────
 
-resource "google_secret_manager_secret" "db_secret" {
-  secret_id = "ebook-db-secret"
+resource "google_secret_manager_secret" "content_processor_db_secret" {
+  secret_id = "ebook-content-processor-db-secret"
 
   replication {
     auto {}
@@ -267,8 +269,23 @@ resource "google_secret_manager_secret" "db_secret" {
   depends_on = [google_project_service.apis]
 }
 
-resource "google_secret_manager_secret_version" "db_secret_version" {
-  secret      = google_secret_manager_secret.db_secret.id
+resource "google_secret_manager_secret_version" "content_processor_db_secret_version" {
+  secret      = google_secret_manager_secret.content_processor_db_secret.id
+  secret_data = "postgresql://ebook_agent:${var.db_password}@${google_sql_database_instance.postgres.private_ip_address}/ebook_agent"
+}
+
+resource "google_secret_manager_secret" "validation_workflow_db_secret" {
+  secret_id = "ebook-validation-workflow-db-secret"
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_secret_manager_secret_version" "validation_workflow_db_secret_version" {
+  secret      = google_secret_manager_secret.validation_workflow_db_secret.id
   secret_data = "postgresql://ebook_agent:${var.db_password}@${google_sql_database_instance.postgres.private_ip_address}/ebook_agent"
 }
 
@@ -379,7 +396,7 @@ resource "google_cloud_run_v2_service" "content_processor" {
         name = "EBOOK_AGENT_DATABASE_URL"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.db_secret.secret_id
+            secret  = google_secret_manager_secret.content_processor_db_secret.secret_id
             version = "latest"
           }
         }
