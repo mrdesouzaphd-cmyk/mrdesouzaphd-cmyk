@@ -1,0 +1,14 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY pyproject.toml .
+RUN pip install --no-cache-dir fastapi uvicorn[standard] google-cloud-aiplatform structlog
+
+COPY config/ config/
+COPY ai_processing/ ai_processing/
+
+EXPOSE 8080
+
+# Validation workflow runs as a standalone Cloud Run service
+CMD ["uvicorn", "ai_processing.validation_service:app", "--host", "0.0.0.0", "--port", "8080"]
