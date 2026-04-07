@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ebook Store</title>
+    <link rel="stylesheet" href="/static/css/main.css" />
+</head>
+<body>
+    <header class="header">
+        <nav class="nav">
+            <a href="/" class="logo">Ebook Agent</a>
+            <div class="nav-links">
+                <a href="/upload">Create Ebook</a>
+                <a href="/store" class="active">Store</a>
+            </div>
+        </nav>
+    </header>
+
+    <main class="store-page">
+        <h2 style="font-weight: 300; font-size: 2rem; color: var(--primary); margin-bottom: 2rem;">
+            Published Ebooks
+        </h2>
+
+        <div class="store-grid" id="store-grid">
+            <!-- Ebook cards populated by JS -->
+            <p id="store-empty" style="color: var(--text-muted);">
+                No ebooks published yet. <a href="/upload">Create your first ebook.</a>
+            </p>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <p>Content-to-Ebook Agent &mdash; Powered by Google Cloud &amp; Vertex AI</p>
+    </footer>
+
+    <script>
+        // Load published ebooks from API
+        async function loadStore() {
+            // In production, this would fetch published ebooks from the API
+            // For now, show placeholder
+        }
+        loadStore();
+    </script>
+</body>
+</html>
